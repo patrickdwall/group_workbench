@@ -1,0 +1,118 @@
+<?php
+/**
+ * @file
+ * This module integrates workbench with groups.
+ */
+
+/**
+ * Implements hook_group_permission().
+ */
+function csnedu_group_workbench_group_permission() {
+  $perms = array();
+  $transitions = workbench_moderation_transitions();
+
+  // Test all possible transitions.
+  foreach ($transitions as $transition) {
+    $from_state = $transition->from_name;
+    $to_state = $transition->to_name;
+
+    $from_state_label = workbench_moderation_state_label($from_state);
+    $to_state_label = workbench_moderation_state_label($to_state);
+
+    // Always set a permission to perform all moderation states.
+    $perms["moderate content from $from_state to $to_state"] = array(
+      'title' => t('Moderate all content from @from_state to @to_state',
+          array('@from_state' => $from_state_label, '@to_state' => $to_state_label)));
+  }
+
+  /* Define a permission to view all group unpublished content to allow users
+  to see content they can moderate */
+  $perms['View all unpublished content'] = array(
+    'title' => t('View all unpublished group content'),
+  );
+
+  return $perms;
+}
+
+/**
+ * Implements hook_node_access_records().
+ *
+ * This function is responsible to define the access records that allow users
+ * of the same group to access unpublished nodes. Grants are only set if node
+ * is unpublished.
+ */
+function csnedu_group_workbench_node_access_records($node) {
+  if (!isset($node->workbench_moderation['my_revision']) || empty($node->group)) {
+    // if not revices or in a group don't need
+    return;
+  }
+  if ($node->workbench_moderation['my_revision']->published) {
+    // don't need to change if published
+    return;
+  }
+
+  $grants = array();
+  $grants[] = array(
+    'realm' => 'csnedu_group_workbench',
+    'gid' => $node->group,
+    'grant_view' => 1,
+    'grant_update' => 0,
+    'grant_delete' => 0,
+    'priority' => 2,
+  );
+  return $grants;
+}
+
+/**
+ * Implements hook_node_grants().
+ *
+ * Will pass grants to every group the user belongs to
+ */
+function csnedu_group_workbench_node_grants($account, $op) {
+  $grants = array();
+
+  // Gets the user groups.
+  $memberships = group_membership_load_by_user($account->uid);
+
+  // Foreach group that user is a member.
+  if (!empty($memberships)) {
+    foreach ($memberships as $membership) {
+      $group = entity_load_single('group', $membership->gid);
+      if ($group->userHasPermission($account->uid, 'View all unpublished content')) {
+        $grants['csnedu_group_workbench'][] = $group->group;
+      }
+    }
+  }
+
+  return $grants;
+}
+
+/**
+ * Implements hook_workbench_moderation_states_next_alter().
+ *
+ * Defines new states according to user permissions.
+ */
+function csnedu_group_workbench_workbench_moderation_states_next_alter(&$states, $current_state, $context) {
+  global $user;
+
+  // Node still does not exist, it is being created, or it's not in a group.
+  if (!isset($context['node']->group)) {
+    return;
+  }
+
+  $group = entity_load_single('group', $context['node']->group);
+  $possible_states = workbench_moderation_state_labels();
+
+  foreach ($possible_states as $state_key => $state_name) {
+    if (!strcmp($state_key, $current_state)) {
+      continue;
+    }
+
+    $permission = t('moderate content from @from_state to @to_state',
+                    array('@from_state' => $current_state, '@to_state' => $state_key));
+
+    if ($group->userHasPermission($user->uid, $permission)) {
+      $states[$state_key] = $state_name;
+    }
+  }
+}

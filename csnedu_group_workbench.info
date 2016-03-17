@@ -1,0 +1,6 @@
+name = Group Workbench
+description = "Custom Module to integrate groups with workbench"
+package = Group
+dependencies[] = group
+dependencies[] = groupcontext
+core = 7.x
